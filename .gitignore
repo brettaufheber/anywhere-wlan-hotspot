@@ -1,0 +1,32 @@
+########################
+# Misc
+#
+
+*.temp
+*.tmp
+*.bak
+*.log
+*.pid
+*.seed
+*.lock
+*.swp
+*~
+
+.DS_Store
+Thumbs.db
+.cache
+.env
+
+/logs/
+/log/
+/temp/
+/tmp/
+
+########################
+# Build tool / IDE
+#
+
+/.idea/
+/.vscode/
+
+########################
