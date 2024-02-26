@@ -130,21 +130,42 @@ function shutdown_with_error {
 
 function connect_modem {
 
+  local LSUSB_OUTPUT
+  local LSUSB_OUTPUT_EXIT_CODE
   local FIND_MODEM_OUTPUT
   local FIND_MODEM_OUTPUT_EXIT_CODE
+  local BUS_NUM
+  local DEV_NUM
+  local USB_CLASS
   local MODEM_INDEX
   local MODEM_DEVICE
   local APN
 
-  # start only if device is connected
-  if ! lsusb | grep -q "ID $VENDOR_ID:$PRODUCT_ID"; then
+  set +e
+  LSUSB_OUTPUT="$(lsusb | grep -E "ID\s+$VENDOR_ID:$PRODUCT_ID")"
+  LSUSB_OUTPUT_EXIT_CODE="$?"
+  set -e
+
+  # start only if device could be found
+  if [[ "$LSUSB_OUTPUT_EXIT_CODE" -ne 0 ]]; then
     echo "Could not find USB device $VENDOR_ID:$PRODUCT_ID" >&2
     return 1
   fi
 
-  if ! run_usb_modeswitch; then
-    echo "Cannot connect to device $VENDOR_ID:$PRODUCT_ID because the mode switch failed" >&2
-    return 1
+  BUS_NUM=$(echo "$LSUSB_OUTPUT" | cut -d ' ' -f 2)
+  DEV_NUM=$(echo "$LSUSB_OUTPUT" | cut -d ' ' -f 4 | tr -d ':')
+
+  USB_CLASS="$(udevadm info --query=all --name="/dev/bus/usb/$BUS_NUM/$DEV_NUM" | grep -F 'ID_USB_INTERFACES=')"
+
+  if [[ "$USB_CLASS" == *":08"* ]]; then
+    if ! run_usb_modeswitch; then
+      echo "Cannot connect to device $VENDOR_ID:$PRODUCT_ID because the mode switch failed" >&2
+      return 1
+    fi
+  elif [[ "$USB_CLASS" == *":02"* || "$USB_CLASS" == *":0a"* ]]; then
+    echo "Skip mode switch for $VENDOR_ID:$PRODUCT_ID because it is not necessary"
+  else
+    echo "Skip mode switch for $VENDOR_ID:$PRODUCT_ID because of an unexpected USB class" >&2
   fi
 
   if ! wait_modem_ready; then
