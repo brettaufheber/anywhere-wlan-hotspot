@@ -37,7 +37,7 @@ function main {
 
       case "${CMD[0]}" in
         connect)
-          if [ "${#CMD[@]}" -ne 1 ]; then
+          if [[ "${#CMD[@]}" -ne 1 ]]; then
             echo "User-Input-Error:  The 'connect' command does not take any arguments" >&2
           elif [[ "$(cat "$LOCK_FILE")" != "DISCONNECTED" ]]; then
             echo "Invalid-State-Error: The 'connect' command is ignored because a connection is already active or being established" >&2
@@ -48,7 +48,7 @@ function main {
           fi
           ;;
         disconnect)
-          if [ "${#CMD[@]}" -ne 1 ]; then
+          if [[ "${#CMD[@]}" -ne 1 ]]; then
             echo "User-Input-Error:  The 'disconnect' command does not take any arguments" >&2
           elif [[ "$(cat "$LOCK_FILE")" != "CONNECTED" ]]; then
             echo "Invalid-State-Error: The 'disconnect' command is ignored because no active connection exists" >&2
@@ -59,7 +59,7 @@ function main {
           fi
           ;;
         disconnect-gracefully)
-          if [ "${#CMD[@]}" -ne 1 ]; then
+          if [[ "${#CMD[@]}" -ne 1 ]]; then
             echo "User-Input-Error:  The 'disconnect-gracefully' command does not take any arguments" >&2
           elif [[ "$(cat "$LOCK_FILE")" != "CONNECTED" ]]; then
             echo "Invalid-State-Error: The 'disconnect-gracefully' command is ignored because no active connection exists" >&2
@@ -70,7 +70,7 @@ function main {
           fi
           ;;
         shutdown)
-          if [ "${#CMD[@]}" -ne 1 ]; then
+          if [[ "${#CMD[@]}" -ne 1 ]]; then
             echo "User-Input-Error:  The 'shutdown' command does not take any arguments" >&2
           elif [[ "$(cat "$LOCK_FILE")" == "CONNECTED" ]]; then
             echo "Stopping modem service and modem connection gracefully..."
@@ -82,15 +82,15 @@ function main {
             RUNNING=false
           fi
           ;;
-        set-connect-delay)
-          if [ "${#CMD[@]}" -ne 2 ]; then
-            echo "User-Input-Error:  The 'set-connect-delay' command requires exactly one argument" >&2
+        set)
+          if [[ "${#CMD[@]}" -ne 3 ]]; then
+            echo "User-Input-Error:  The 'set <key> <value>' command requires exactly two argument" >&2
           else
-            if [[ "${CMD[1]}" =~ ^[0-9]+$ ]]; then
-              CONNECT_DELAY="${CMD[1]}"
+            if [[ "${CMD[1]}" = 'connect-delay' && "${CMD[2]}" =~ ^[0-9]+$ ]]; then
+              CONNECT_DELAY="${CMD[2]}"
               echo "Set connect delay to $CONNECT_DELAY seconds"
             else
-              echo "User-Input-Error: The connect delay must be a positive number" >&2
+              echo "User-Input-Error: Incorrect arguments for the 'set <key> <value>' command" >&2
             fi
           fi
           ;;
