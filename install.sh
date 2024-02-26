@@ -82,6 +82,8 @@ cp -fp ./auto-modem-manager-shutdown.sh "$INSTALL_DIR/sbin/"
   echo "ALLOW_ROAMING=\"$ALLOW_ROAMING\""
 } > "$ENV_FILE"
 
+chmod +x "$PIPE_CMD_HELPER_FILE"
+
 # inform systemd about the new or modified service file
 systemctl daemon-reload
 

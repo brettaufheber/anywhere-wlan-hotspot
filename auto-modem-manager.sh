@@ -152,12 +152,16 @@ function connect_modem {
     return 1
   fi
 
+  # load the usb serial driver with the specified vendor and product IDs
+  modprobe usbserial "vendor=0x$VENDOR_ID" "product=0x$PRODUCT_ID"
+
   BUS_NUM=$(echo "$LSUSB_OUTPUT" | cut -d ' ' -f 2)
   DEV_NUM=$(echo "$LSUSB_OUTPUT" | cut -d ' ' -f 4 | tr -d ':')
 
   USB_CLASS="$(udevadm info --query=all --name="/dev/bus/usb/$BUS_NUM/$DEV_NUM" | grep -F 'ID_USB_INTERFACES=')"
 
   if [[ "$USB_CLASS" == *":08"* ]]; then
+    echo "Perform USB mode switch..."
     if ! run_usb_modeswitch; then
       echo "Cannot connect to device $VENDOR_ID:$PRODUCT_ID because the mode switch failed" >&2
       return 1
@@ -258,9 +262,6 @@ function run_usb_modeswitch {
 
   RETRY_LIMIT=10
   RETRY_COUNT=0
-
-  # load the usb serial driver with the specified vendor and product IDs
-  modprobe usbserial "vendor=0x$VENDOR_ID" "product=0x$PRODUCT_ID"
 
   while true; do
 
