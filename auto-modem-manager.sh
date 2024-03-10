@@ -11,6 +11,7 @@ function main {
   # MODE_SWITCH_OPTIONS
   #
 
+  local RUNNING
   local CONNECT_DELAY
   local LINE
   local CMD
@@ -57,17 +58,6 @@ function main {
           else
             echo "Stopping modem connection..."
             echo "DISCONNECTING" > "$LOCK_FILE"
-            (disconnect_modem true || true ; echo "DISCONNECTED" > "$LOCK_FILE") &
-          fi
-          ;;
-        disconnect-gracefully)
-          if [[ "${#CMD[@]}" -ne 1 ]]; then
-            echo "User-Input-Error:  The 'disconnect-gracefully' command does not take any arguments" >&2
-          elif [[ "$(cat "$LOCK_FILE")" != "CONNECTED" ]]; then
-            echo "Invalid-State-Error: The 'disconnect-gracefully' command is ignored because no active connection exists" >&2
-          else
-            echo "Stopping modem connection gracefully..."
-            echo "DISCONNECTING" > "$LOCK_FILE"
             (disconnect_modem || true ; echo "DISCONNECTED" > "$LOCK_FILE") &
           fi
           ;;
@@ -97,7 +87,7 @@ function main {
             elif [[ "${CMD[1]}" = 'allow-roaming' && "${CMD[2]}" =~ ^(false)|(no)|(off)|(0)$ ]]; then
               ALLOW_ROAMING=no
               echo "Disallow roaming after reconnect"
-            elif [[ "${CMD[1]}" = 'allow-roaming' && "${CMD[2]}" =~ ^(ipv4)|(ipv6)|(ipv4v6)$ ]]; then
+            elif [[ "${CMD[1]}" = 'ip-type' && "${CMD[2]}" =~ ^(ipv4)|(ipv6)|(ipv4v6)$ ]]; then
               IP_TYPE="${CMD[2]}"
               echo "Set IP type to $IP_TYPE"
             else
@@ -120,6 +110,8 @@ function main {
   rm -f "$PIPE_FILE"
   rm -f "$LOCK_FILE"
   rm -f "$PID_FILE"
+
+  echo "The modem service was stopped"
 }
 
 function shutdown {
@@ -234,13 +226,10 @@ function connect_modem {
 
 function disconnect_modem  {
 
-  local NON_GRACEFUL_FLAG
   local FIND_MODEM_OUTPUT
   local FIND_MODEM_OUTPUT_EXIT_CODE
   local MODEM_INDEX
   local MODEM_DEVICE
-
-  NON_GRACEFUL_FLAG="${1:-false}"
 
   # find the index and the primary serial port of the selected modem
   set +e
@@ -258,13 +247,22 @@ function disconnect_modem  {
   MODEM_DEVICE="$(echo "$FIND_MODEM_OUTPUT" | grep -oP 'device=\K/dev/\w+')"
 
   # teardown PPP interface
+  echo "Sending SIGTERM to pppd process for device $MODEM_DEVICE..."
   pkill -f "pppd $MODEM_DEVICE"
+  sleep 5  # give the pppd process time to terminate
+  echo "SIGTERM sent to pppd process."
 
-  if ! "$NON_GRACEFUL_FLAG"; then
-    # teardown modem
-    mmcli -m "$MODEM_INDEX" --simple-disconnect
-    mmcli -m "$MODEM_INDEX" --disable
-  fi
+  set +e
+  echo "Disconnecting modem with index $MODEM_INDEX..."
+  mmcli -m "$MODEM_INDEX" --simple-disconnect \
+    && echo "Modem disconnected."
+  set -e
+
+  set +e
+  echo "Disabling modem with index $MODEM_INDEX..."
+  mmcli -m "$MODEM_INDEX" --disable \
+    && echo "Modem disabled."
+  set -e
 }
 
 function run_usb_modeswitch {
