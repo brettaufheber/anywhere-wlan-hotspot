@@ -9,8 +9,7 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 USB_DEVICE_ID="$1"              # use lsusb to find the USB ID for your device (e.g. 12d1:1003)
-MODE_SWITCH_OPTIONS="${2:--K}"  # additional options for the usb_modeswitch call (-K, -X, ...)
-ALLOW_ROAMING="${3:-no}"        # roaming flag (yes or no)
+MODE_SWITCH_OPTIONS="${*:2}"    # additional options for the usb_modeswitch call (-K, -X, ...)
 
 VENDOR_ID="$(echo "$USB_DEVICE_ID" | cut -d':' -f1)"
 PRODUCT_ID="$(echo "$USB_DEVICE_ID" | cut -d':' -f2)"
@@ -79,7 +78,6 @@ cp -fp ./auto-modem-manager-shutdown.sh "$INSTALL_DIR/sbin/"
   echo "VENDOR_ID=\"$VENDOR_ID\""
   echo "PRODUCT_ID=\"$PRODUCT_ID\""
   echo "MODE_SWITCH_OPTIONS=\"$MODE_SWITCH_OPTIONS\""
-  echo "ALLOW_ROAMING=\"$ALLOW_ROAMING\""
 } > "$ENV_FILE"
 
 chmod +x "$PIPE_CMD_HELPER_FILE"

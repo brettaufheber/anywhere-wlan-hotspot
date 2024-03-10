@@ -9,14 +9,15 @@ function main {
   # VENDOR_ID
   # PRODUCT_ID
   # MODE_SWITCH_OPTIONS
-  # ALLOW_ROAMING
   #
 
+  local ALLOW_ROAMING
   local CONNECT_DELAY
   local LINE
   local CMD
 
   RUNNING=true
+  ALLOW_ROAMING=no
   CONNECT_DELAY=0
 
   # create PID file
@@ -89,6 +90,12 @@ function main {
             if [[ "${CMD[1]}" = 'connect-delay' && "${CMD[2]}" =~ ^[0-9]+$ ]]; then
               CONNECT_DELAY="${CMD[2]}"
               echo "Set connect delay to $CONNECT_DELAY seconds"
+            elif [[ "${CMD[1]}" = 'allow-roaming' && "${CMD[2]}" =~ ^(true)|(yes)|(on)|(1)$ ]]; then
+              ALLOW_ROAMING=yes
+              echo "Allow roaming after reconnect"
+            elif [[ "${CMD[1]}" = 'allow-roaming' && "${CMD[2]}" =~ ^(false)|(no)|(off)|(0)$ ]]; then
+              ALLOW_ROAMING=no
+              echo "Disallow roaming after reconnect"
             else
               echo "User-Input-Error: Incorrect arguments for the 'set <key> <value>' command" >&2
             fi
@@ -138,6 +145,7 @@ function connect_modem {
   local DEV_NUM
   local USB_CLASS
   local MODEM_INDEX
+  local MODEM_BEARER_INDEX
   local MODEM_DEVICE
   local APN
 
@@ -210,11 +218,13 @@ function connect_modem {
   echo "The current routing table:"
   ip route
 
+  MODEM_BEARER_INDEX="$(mmcli -m "$MODEM_INDEX" --output-keyvalue | grep -F 'modem.generic.bearers.value' | grep -oP ':\s*/org/freedesktop/ModemManager\d+/Bearer/\K\d+' | head -n 1)"
+
   # show metrics about modem
   echo "The metrics about the established connection:"
   set +e
   mmcli -m "$MODEM_INDEX"
-  mmcli -m "$MODEM_INDEX" -b 0
+  mmcli -m "$MODEM_INDEX" -b "$MODEM_BEARER_INDEX"
   set -e
 }
 
@@ -398,7 +408,7 @@ function find_modem {
   local VENDOR_ID_FOUND
   local PRODUCT_ID_FOUND
 
-  for MODEM_INDEX in $(mmcli -L | grep -oP '^\s+/org/freedesktop/ModemManager\d+/Modem/\K\d+'); do
+  for MODEM_INDEX in $(mmcli -L | grep -oP '^\s*/org/freedesktop/ModemManager\d+/Modem/\K\d+'); do
 
     # find the primary serial port
     MODEM_DEVICE="/dev/$(mmcli -m "$MODEM_INDEX" --output-keyvalue | grep -F 'modem.generic.ports.value' | grep -oP 'ttyUSB\d+' | head -n 1)"
