@@ -25,6 +25,7 @@ function main {
 
   # create pipe
   mkfifo "$PIPE_FILE"
+  chmod 622 "$PIPE_FILE"
 
   # create lock file
   echo "DISCONNECTED" > "$LOCK_FILE"
