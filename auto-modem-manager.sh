@@ -11,13 +11,13 @@ function main {
   # MODE_SWITCH_OPTIONS
   #
 
-  local ALLOW_ROAMING
   local CONNECT_DELAY
   local LINE
   local CMD
 
   RUNNING=true
   ALLOW_ROAMING=no
+  IP_TYPE=ipv4v6
   CONNECT_DELAY=0
 
   # create PID file
@@ -97,6 +97,9 @@ function main {
             elif [[ "${CMD[1]}" = 'allow-roaming' && "${CMD[2]}" =~ ^(false)|(no)|(off)|(0)$ ]]; then
               ALLOW_ROAMING=no
               echo "Disallow roaming after reconnect"
+            elif [[ "${CMD[1]}" = 'allow-roaming' && "${CMD[2]}" =~ ^(ipv4)|(ipv6)|(ipv4v6)$ ]]; then
+              IP_TYPE="${CMD[2]}"
+              echo "Set IP type to $IP_TYPE"
             else
               echo "User-Input-Error: Incorrect arguments for the 'set <key> <value>' command" >&2
             fi
@@ -209,8 +212,8 @@ function connect_modem {
   APN="$(get_apn "$MODEM_DEVICE")"
 
   # connect to the modem using the extracted parameters
-  echo "Connecting to modem (apn=$APN, allow-roaming=$ALLOW_ROAMING)"
-  mmcli -m "$MODEM_INDEX" --simple-connect="apn=$APN,allow-roaming=$ALLOW_ROAMING"
+  echo "Connecting to modem (apn=$APN, allow-roaming=$ALLOW_ROAMING, ip-type=$IP_TYPE)"
+  mmcli -m "$MODEM_INDEX" --simple-connect="apn=$APN,allow-roaming=$ALLOW_ROAMING,ip-type=$IP_TYPE"
 
   setup_ppp_interface "$MODEM_DEVICE"
   set_default_interface
