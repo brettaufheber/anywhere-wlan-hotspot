@@ -111,7 +111,7 @@ function main {
   rm -f "$LOCK_FILE"
   rm -f "$PID_FILE"
 
-  echo "The modem service was stopped"
+  echo "The modem service has been shutdown"
 }
 
 function shutdown {
@@ -246,11 +246,9 @@ function disconnect_modem  {
   MODEM_INDEX="$(echo "$FIND_MODEM_OUTPUT" | grep -oP 'index=\K\w+')"
   MODEM_DEVICE="$(echo "$FIND_MODEM_OUTPUT" | grep -oP 'device=\K/dev/\w+')"
 
-  # teardown PPP interface
-  echo "Sending SIGTERM to pppd process for device $MODEM_DEVICE..."
-  pkill -f "pppd $MODEM_DEVICE"
-  sleep 5  # give the pppd process time to terminate
-  echo "SIGTERM sent to pppd process."
+# TODO: interface dynamisch ermitteln, eventuell ausgabe von pppd und mmcli prüfen
+  ip route del default
+  ip link set ppp0 down
 
   set +e
   echo "Disconnecting modem with index $MODEM_INDEX..."
@@ -263,6 +261,16 @@ function disconnect_modem  {
   mmcli -m "$MODEM_INDEX" --disable \
     && echo "Modem disabled."
   set -e
+
+  # teardown PPP interface
+  echo "Sending SIGTERM to pppd process for device $MODEM_DEVICE..."
+  pkill -f "pppd $MODEM_DEVICE"
+  echo "SIGTERM sent to pppd process."
+
+  while pgrep -f "pppd $MODEM_DEVICE" > /dev/null; do
+      echo "Waiting for the pppd process to terminate. Recheck in 5 seconds..."
+      sleep 5
+  done
 }
 
 function run_usb_modeswitch {
