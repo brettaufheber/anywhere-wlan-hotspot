@@ -18,7 +18,7 @@ function main {
 
   RUNNING=true
   ALLOW_ROAMING=no
-  IP_TYPE=ipv4v6
+  IP_TYPE=ipv4
   CONNECT_DELAY=0
 
   # create PID file
@@ -383,6 +383,8 @@ function setup_ppp_interface {
   noauth
   usepeerdns
   defaultroute
+  replacedefaultroute
+  persist
   ' > "$TEMP_PPP_CONFIG_FILE"
 
   # setup PPP interface
