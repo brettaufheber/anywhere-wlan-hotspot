@@ -45,7 +45,9 @@ cp -fp ./auto-modem-manager-shutdown.sh "$INSTALL_DIR/sbin/"
   echo
   echo "source '$ENV_FILE'"
   echo
-  echo "  echo \"\$@\" > \"\$PIPE_FILE\""
+  echo 'if [[ -p "$PIPE_FILE" ]]; then'
+  echo '  echo "$@" > "$PIPE_FILE"'
+  echo 'fi'
   echo
   echo "exit 0"
   echo

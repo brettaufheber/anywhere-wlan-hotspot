@@ -194,14 +194,11 @@ function connect_modem {
   MODEM_INDEX="$(echo "$FIND_MODEM_OUTPUT" | grep -oP 'index=\K\w+')"
   MODEM_DEVICE="$(echo "$FIND_MODEM_OUTPUT" | grep -oP 'device=\K/dev/\w+')"
 
-  # enable modem
-  echo "Enable modem (index=$MODEM_INDEX)"
-  #mmcli -m "$MODEM_INDEX" --enable
-
   {
     echo "[connection]"
     echo "id=$CONNECTION_ID"
     echo "type=gsm"
+    echo "autoconnect=no"
     echo
     echo "[gsm]"
     echo "auto-config=true"
@@ -212,14 +209,14 @@ function connect_modem {
     echo "method=auto"
     echo
     echo "[ipv6]"
-    echo "method=auto"
+    echo "method=ignore"
     echo
   } > "/etc/NetworkManager/system-connections/$CONNECTION_ID.nmconnection"
 
-  sudo chmod 600 "/etc/NetworkManager/system-connections/$CONNECTION_ID.nmconnection"
+  chmod 600 "/etc/NetworkManager/system-connections/$CONNECTION_ID.nmconnection"
 
   nmcli connection reload
-  nmcli con up id "$CONNECTION_ID"
+  run_connection_up
   ip route add default dev "$(nmcli connection show "$CONNECTION_ID" | grep '^GENERAL.IP-IFACE:' | grep -oP ':\s*\K\w+')"
 
   # display current routing table
@@ -239,7 +236,7 @@ function connect_modem {
 function disconnect_modem  {
 
   ip route del default || true
-  nmcli con down id "$CONNECTION_ID" || true
+  run_connection_down || true
   nmcli con delete "$CONNECTION_ID" || true
 }
 
@@ -272,6 +269,56 @@ function run_usb_modeswitch {
     else
       echo "$OUTPUT"
       echo "The mode switch executed successfully"
+      break
+    fi
+  done
+}
+
+function run_connection_up {
+
+  local RETRY_LIMIT       # maximum number of retry attempts
+  local RETRY_COUNT       # current number of retry attempts
+
+  RETRY_LIMIT=5
+  RETRY_COUNT=0
+
+  while true; do
+
+    if ! nmcli con up id "$CONNECTION_ID"; then
+      ((RETRY_COUNT++))
+      if [[ $RETRY_COUNT -ge $RETRY_LIMIT ]]; then
+        echo "Aborting the connection up operation because the maximum retry limit has been reached" >&2
+        return 1
+      fi
+      echo "The connection up operation failed. Retrying in 5 seconds..."
+      sleep 5
+    else
+      echo "The connection up operation executed successfully"
+      break
+    fi
+  done
+}
+
+function run_connection_down {
+
+  local RETRY_LIMIT       # maximum number of retry attempts
+  local RETRY_COUNT       # current number of retry attempts
+
+  RETRY_LIMIT=5
+  RETRY_COUNT=0
+
+  while true; do
+
+    if ! nmcli con down id "$CONNECTION_ID"; then
+      ((RETRY_COUNT++))
+      if [[ $RETRY_COUNT -ge $RETRY_LIMIT ]]; then
+        echo "Aborting the connection down operation because the maximum retry limit has been reached" >&2
+        return 1
+      fi
+      echo "The connection down operation failed. Retrying in 5 seconds..."
+      sleep 5
+    else
+      echo "The connection down operation executed successfully"
       break
     fi
   done
