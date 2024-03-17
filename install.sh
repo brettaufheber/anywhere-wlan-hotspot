@@ -48,6 +48,7 @@ cp -fp ./auto-modem-manager-shutdown.sh "$INSTALL_DIR/sbin/"
   echo "  echo \"\$@\" > \"\$PIPE_FILE\""
   echo
   echo "exit 0"
+  echo
 } > "$PIPE_CMD_HELPER_FILE"
 
 {
@@ -66,6 +67,7 @@ cp -fp ./auto-modem-manager-shutdown.sh "$INSTALL_DIR/sbin/"
   echo
   echo "[Install]"
   echo "WantedBy=multi-user.target"
+  echo
 } > "$SERVICE_FILE"
 
 {
@@ -76,6 +78,8 @@ cp -fp ./auto-modem-manager-shutdown.sh "$INSTALL_DIR/sbin/"
   echo "VENDOR_ID=\"$VENDOR_ID\""
   echo "PRODUCT_ID=\"$PRODUCT_ID\""
   echo "MODE_SWITCH_OPTIONS=\"$MODE_SWITCH_OPTIONS\""
+  echo "CONNECTION_ID=\"mobile-broadband\""
+  echo
 } > "$ENV_FILE"
 
 chmod +x "$PIPE_CMD_HELPER_FILE"

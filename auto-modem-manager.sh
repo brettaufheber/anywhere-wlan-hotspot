@@ -9,6 +9,7 @@ function main {
   # VENDOR_ID
   # PRODUCT_ID
   # MODE_SWITCH_OPTIONS
+  # CONNECTION_ID
   #
 
   local RUNNING
@@ -17,8 +18,6 @@ function main {
   local CMD
 
   RUNNING=true
-  ALLOW_ROAMING=no
-  IP_TYPE=ipv4
   CONNECT_DELAY=0
 
   # create PID file
@@ -82,14 +81,14 @@ function main {
               CONNECT_DELAY="${CMD[2]}"
               echo "Set connect delay to $CONNECT_DELAY seconds"
             elif [[ "${CMD[1]}" = 'allow-roaming' && "${CMD[2]}" =~ ^(true)|(yes)|(on)|(1)$ ]]; then
-              ALLOW_ROAMING=yes
+              DISALLOW_ROAMING=false
               echo "Allow roaming after reconnect"
             elif [[ "${CMD[1]}" = 'allow-roaming' && "${CMD[2]}" =~ ^(false)|(no)|(off)|(0)$ ]]; then
-              ALLOW_ROAMING=no
+              DISALLOW_ROAMING=true
               echo "Disallow roaming after reconnect"
-            elif [[ "${CMD[1]}" = 'ip-type' && "${CMD[2]}" =~ ^(ipv4)|(ipv6)|(ipv4v6)$ ]]; then
-              IP_TYPE="${CMD[2]}"
-              echo "Set IP type to $IP_TYPE"
+            elif [[ "${CMD[1]}" = 'apn' && "${CMD[2]}" =~ ^[a-zA-Z0-9.-]+$ ]]; then
+              APN="${CMD[2]}"
+              echo "Set APN to $APN"
             else
               echo "User-Input-Error: Incorrect arguments for the 'set <key> <value>' command" >&2
             fi
@@ -143,7 +142,6 @@ function connect_modem {
   local MODEM_INDEX
   local MODEM_BEARER_INDEX
   local MODEM_DEVICE
-  local APN
 
   set +e
   LSUSB_OUTPUT="$(lsusb | grep -E "ID\s+$VENDOR_ID:$PRODUCT_ID")"
@@ -198,17 +196,31 @@ function connect_modem {
 
   # enable modem
   echo "Enable modem (index=$MODEM_INDEX)"
-  mmcli -m "$MODEM_INDEX" --enable
+  #mmcli -m "$MODEM_INDEX" --enable
 
-  # find APN using SIM card
-  APN="$(get_apn "$MODEM_DEVICE")"
+  {
+    echo "[connection]"
+    echo "id=$CONNECTION_ID"
+    echo "type=gsm"
+    echo
+    echo "[gsm]"
+    echo "auto-config=true"
+    echo "home-only=${DISALLOW_ROAMING:-true}"
+    echo "apn=${APN:-$(get_apn "$MODEM_DEVICE")}"
+    echo
+    echo "[ipv4]"
+    echo "method=auto"
+    echo
+    echo "[ipv6]"
+    echo "method=auto"
+    echo
+  } > "/etc/NetworkManager/system-connections/$CONNECTION_ID.nmconnection"
 
-  # connect to the modem using the extracted parameters
-  echo "Connecting to modem (apn=$APN, allow-roaming=$ALLOW_ROAMING, ip-type=$IP_TYPE)"
-  mmcli -m "$MODEM_INDEX" --simple-connect="apn=$APN,allow-roaming=$ALLOW_ROAMING,ip-type=$IP_TYPE"
+  sudo chmod 600 "/etc/NetworkManager/system-connections/$CONNECTION_ID.nmconnection"
 
-  setup_ppp_interface "$MODEM_DEVICE"
-  set_default_interface
+  nmcli connection reload
+  nmcli con up id "$CONNECTION_ID"
+  ip route add default dev "$(nmcli connection show "$CONNECTION_ID" | grep '^GENERAL.IP-IFACE:' | grep -oP ':\s*\K\w+')"
 
   # display current routing table
   echo "The current routing table:"
@@ -226,51 +238,9 @@ function connect_modem {
 
 function disconnect_modem  {
 
-  local FIND_MODEM_OUTPUT
-  local FIND_MODEM_OUTPUT_EXIT_CODE
-  local MODEM_INDEX
-  local MODEM_DEVICE
-
-  # find the index and the primary serial port of the selected modem
-  set +e
-  FIND_MODEM_OUTPUT="$(find_modem)"
-  FIND_MODEM_OUTPUT_EXIT_CODE="$?"
-  set -e
-
-  if [[ "$FIND_MODEM_OUTPUT_EXIT_CODE" -ne 0 ]]; then
-    echo "Failed to find the modem matching $VENDOR_ID:$PRODUCT_ID" >&2
-    return 1
-  fi
-
-  # extract index and the primary serial port
-  MODEM_INDEX="$(echo "$FIND_MODEM_OUTPUT" | grep -oP 'index=\K\w+')"
-  MODEM_DEVICE="$(echo "$FIND_MODEM_OUTPUT" | grep -oP 'device=\K/dev/\w+')"
-
-# TODO: interface dynamisch ermitteln, eventuell ausgabe von pppd und mmcli prüfen
-  ip route del default
-  ip link set ppp0 down
-
-  set +e
-  echo "Disconnecting modem with index $MODEM_INDEX..."
-  mmcli -m "$MODEM_INDEX" --simple-disconnect \
-    && echo "Modem disconnected."
-  set -e
-
-  set +e
-  echo "Disabling modem with index $MODEM_INDEX..."
-  mmcli -m "$MODEM_INDEX" --disable \
-    && echo "Modem disabled."
-  set -e
-
-  # teardown PPP interface
-  echo "Sending SIGTERM to pppd process for device $MODEM_DEVICE..."
-  pkill -f "pppd $MODEM_DEVICE"
-  echo "SIGTERM sent to pppd process."
-
-  while pgrep -f "pppd $MODEM_DEVICE" > /dev/null; do
-      echo "Waiting for the pppd process to terminate. Recheck in 5 seconds..."
-      sleep 5
-  done
+  ip route del default || true
+  nmcli con down id "$CONNECTION_ID" || true
+  nmcli con delete "$CONNECTION_ID" || true
 }
 
 function run_usb_modeswitch {
@@ -368,48 +338,6 @@ function get_apn {
 
   # extract the APN from the CGDCONT response
   echo "$CGDCONT_OUTPUT" | cut -d',' -f3 | tr -d '"'
-}
-
-function setup_ppp_interface {
-
-  local TEMP_PPP_CONFIG_FILE
-  local MODEM_DEVICE
-
-  # create a temporary file for PPP configuration
-  TEMP_PPP_CONFIG_FILE="$(mktemp)"
-  MODEM_DEVICE="$1"
-
-  echo '
-  noauth
-  usepeerdns
-  defaultroute
-  replacedefaultroute
-  persist
-  ' > "$TEMP_PPP_CONFIG_FILE"
-
-  # setup PPP interface
-  pppd "$MODEM_DEVICE" file "$TEMP_PPP_CONFIG_FILE"
-
-  # make sure pppd has enough time to read the temporary file
-  sleep 3
-
-  rm "$TEMP_PPP_CONFIG_FILE"
-}
-
-function set_default_interface {
-
-  local INTERFACE_NOT_READY
-
-  ip route del default
-
-  # set modem as default interface
-  INTERFACE_NOT_READY=true
-  while "$INTERFACE_NOT_READY"; do
-    sleep 1
-    if ip route add default dev ppp0; then
-      INTERFACE_NOT_READY=false
-    fi
-  done
 }
 
 function find_modem {
