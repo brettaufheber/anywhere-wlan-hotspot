@@ -8,7 +8,8 @@ function main {
   # PID_FILE
   # VENDOR_ID
   # PRODUCT_ID
-  # CONNECTION_ID
+  # GSM_CONNECTION_ID
+  # WIFI_CONNECTION_ID
   # MODE_SWITCH_OPTIONS
   # MODEM_BOOT_DELAY
   #
@@ -39,7 +40,7 @@ function main {
           else
             echo "Starting modem connection with a delay of $MODEM_BOOT_DELAY seconds..."
             echo "CONNECTING" > "$LOCK_FILE"
-            (sleep "$MODEM_BOOT_DELAY" && connect_modem && echo "CONNECTED" > "$LOCK_FILE" || echo "DISCONNECTED" > "$LOCK_FILE") &
+            (set -euo pipefail; sleep "$MODEM_BOOT_DELAY" && connect_modem && echo "CONNECTED" > "$LOCK_FILE" || echo "DISCONNECTED" > "$LOCK_FILE") &
           fi
           ;;
         disconnect)
@@ -48,7 +49,7 @@ function main {
           else
             echo "Stopping modem connection..."
             echo "DISCONNECTING" > "$LOCK_FILE"
-            (disconnect_modem || true ; echo "DISCONNECTED" > "$LOCK_FILE") &
+            (set -euo pipefail; disconnect_modem || true; echo "DISCONNECTED" > "$LOCK_FILE") &
           fi
           ;;
         shutdown)
@@ -110,12 +111,11 @@ function connect_modem {
   local MODEM_INDEX
   local MODEM_BEARER_INDEX
   local MODEM_DEVICE
-  local NET_INTERFACE
   local APN_CONFIGURED
   local APN
 
   set +e
-  LSUSB_OUTPUT="$(lsusb | grep -E "ID\s+$VENDOR_ID:$PRODUCT_ID")"
+  LSUSB_OUTPUT="$(lsusb | grep -E "ID\s+$VENDOR_ID:$PRODUCT_ID\s+")"
   LSUSB_OUTPUT_EXIT_CODE="$?"
   set -e
 
@@ -165,22 +165,18 @@ function connect_modem {
   MODEM_INDEX="$(echo "$FIND_MODEM_OUTPUT" | grep -oP 'index=\K\w+')"
   MODEM_DEVICE="$(echo "$FIND_MODEM_OUTPUT" | grep -oP 'device=\K/dev/\w+')"
 
-  APN_CONFIGURED=$(nmcli -g gsm.apn connection show "$CONNECTION_ID")
+  APN_CONFIGURED=$(nmcli -g gsm.apn connection show "$GSM_CONNECTION_ID")
 
   if [[ -z "$APN_CONFIGURED" ]]; then
     APN="$(get_apn "$MODEM_DEVICE")"
     echo "Use an APN determined by the modem settings: $APN"
-    nmcli connection modify "$CONNECTION_ID" gsm.apn "$APN"
+    nmcli connection modify "$GSM_CONNECTION_ID" gsm.apn "$APN"
     nmcli connection reload
   else
     echo "Use a manually configured APN: $APN_CONFIGURED"
   fi
 
-  NET_INTERFACE="$(nmcli connection show "$CONNECTION_ID" | grep '^GENERAL.IP-IFACE:' | grep -oP ':\s*\K\w+')"
-
   run_connection_up
-  ip route del default
-  ip route add default dev "$NET_INTERFACE"
 
   # display current routing table
   echo "The current routing table:"
@@ -199,8 +195,13 @@ function connect_modem {
 
 function disconnect_modem  {
 
-  ip route del default
-  run_connection_down
+  sleep 1
+
+  if lsusb | grep -qE "ID\s+$VENDOR_ID:$PRODUCT_ID\s+"; then
+    run_connection_down
+  else
+    echo "The USB device $VENDOR_ID:$PRODUCT_ID is no longer connected"
+  fi
 }
 
 function run_usb_modeswitch {
@@ -247,7 +248,7 @@ function run_connection_up {
 
   while true; do
 
-    if ! nmcli con up id "$CONNECTION_ID"; then
+    if ! nmcli con up id "$GSM_CONNECTION_ID"; then
       ((RETRY_COUNT++))
       if [[ $RETRY_COUNT -ge $RETRY_LIMIT ]]; then
         echo "Aborting the connection up operation because the maximum retry limit has been reached" >&2
@@ -272,7 +273,7 @@ function run_connection_down {
 
   while true; do
 
-    if ! nmcli con down id "$CONNECTION_ID"; then
+    if ! nmcli con down id "$GSM_CONNECTION_ID"; then
       ((RETRY_COUNT++))
       if [[ $RETRY_COUNT -ge $RETRY_LIMIT ]]; then
         echo "Aborting the connection down operation because the maximum retry limit has been reached" >&2
