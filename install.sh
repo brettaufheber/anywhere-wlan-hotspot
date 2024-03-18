@@ -8,21 +8,27 @@ if [[ $EUID -ne 0 ]]; then
   exit 1
 fi
 
-USB_DEVICE_ID="$1"              # use lsusb to find the USB ID for your device (e.g. 12d1:1003)
-MODE_SWITCH_OPTIONS="${*:2}"    # additional options for the usb_modeswitch call (-K, -X, ...)
+source ".env"
+
+TASK="${1:-install}"
+
 
 VENDOR_ID="$(echo "$USB_DEVICE_ID" | cut -d':' -f1)"
 PRODUCT_ID="$(echo "$USB_DEVICE_ID" | cut -d':' -f2)"
 
 SERVICE_NAME="AutoModemManager.service"
+CONNECTION_ID="mobile-broadband"
 INSTALL_DIR="/opt/auto-modem-manager"
 PIPE_FILE="/var/run/auto-modem-manager-control-pipe"
 LOCK_FILE="/var/run/auto-modem-manager.lock"
 PID_FILE="/run/auto-modem-manager.pid"
 SERVICE_FILE="/etc/systemd/system/$SERVICE_NAME"
 ENV_FILE="$INSTALL_DIR/config.env"
+CONNECTION_FILE="/etc/NetworkManager/system-connections/$CONNECTION_ID.nmconnection"
 PIPE_CMD_HELPER_FILE="/usr/local/sbin/auto-modem-manager-send.sh"
 UDEV_RULE_FILE="/etc/udev/rules.d/70-auto-modem-manager.rules"
+
+if [[ "$TASK" = "install" ]]; then
 
 echo "installing modem service..."
 
@@ -37,21 +43,6 @@ mkdir -p "$INSTALL_DIR/sbin/"
 cp -fp ./auto-modem-manager.sh "$INSTALL_DIR/sbin/"
 cp -fp ./auto-modem-manager-setup.sh "$INSTALL_DIR/sbin/"
 cp -fp ./auto-modem-manager-shutdown.sh "$INSTALL_DIR/sbin/"
-
-{
-  echo "#!/bin/bash"
-  echo
-  echo "set -euo pipefail"
-  echo
-  echo "source '$ENV_FILE'"
-  echo
-  echo 'if [[ -p "$PIPE_FILE" ]]; then'
-  echo '  echo "$@" > "$PIPE_FILE"'
-  echo 'fi'
-  echo
-  echo "exit 0"
-  echo
-} > "$PIPE_CMD_HELPER_FILE"
 
 {
   echo "[Unit]"
@@ -79,10 +70,53 @@ cp -fp ./auto-modem-manager-shutdown.sh "$INSTALL_DIR/sbin/"
   echo "APP_FILE=\"$INSTALL_DIR/sbin/auto-modem-manager.sh\""
   echo "VENDOR_ID=\"$VENDOR_ID\""
   echo "PRODUCT_ID=\"$PRODUCT_ID\""
+  echo "CONNECTION_ID=\"$CONNECTION_ID\""
   echo "MODE_SWITCH_OPTIONS=\"$MODE_SWITCH_OPTIONS\""
-  echo "CONNECTION_ID=\"mobile-broadband\""
+  echo "MODEM_BOOT_DELAY=\"$MODEM_BOOT_DELAY\""
   echo
 } > "$ENV_FILE"
+
+{
+  echo "[connection]"
+  echo "id=$CONNECTION_ID"
+  echo "type=gsm"
+  echo "autoconnect=no"
+  echo
+  echo "[gsm]"
+  echo "auto-config=true"
+  echo "home-only=${DISALLOW_ROAMING:-true}"
+
+  if [[ -n "${APN:-}" ]]; then
+    echo "apn=$APN"
+  fi
+
+  echo
+  echo "[ipv4]"
+  echo "method=${IPV4_METHOD:-auto}"
+  echo
+  echo "[ipv6]"
+  echo "method=${IPV6_METHOD:-auto}"
+  echo
+} > "$CONNECTION_FILE"
+
+chmod 600 "$CONNECTION_FILE"
+
+nmcli connection reload
+
+{
+  echo "#!/bin/bash"
+  echo
+  echo "set -euo pipefail"
+  echo
+  echo "source '$ENV_FILE'"
+  echo
+  echo 'if [[ -p "$PIPE_FILE" ]]; then'
+  echo '  echo "$@" > "$PIPE_FILE"'
+  echo 'fi'
+  echo
+  echo "exit 0"
+  echo
+} > "$PIPE_CMD_HELPER_FILE"
 
 chmod +x "$PIPE_CMD_HELPER_FILE"
 
@@ -110,5 +144,25 @@ udevadm control --reload-rules
 udevadm trigger
 
 echo "udev rule for USB modem with Vendor ID $VENDOR_ID and Product ID $PRODUCT_ID has been created."
+
+elif [[ "$TASK" = "uninstall" ]]; then
+
+  systemctl stop "$SERVICE_NAME"
+  systemctl desable "$SERVICE_NAME"
+
+  nmcli con delete "$CONNECTION_ID" || true
+
+  rm -rf "$INSTALL_DIR"
+  rm -f "$PIPE_FILE"
+  rm -f "$LOCK_FILE"
+  rm -f "$PID_FILE"
+  rm -f "$SERVICE_FILE"
+  rm -f "$PIPE_CMD_HELPER_FILE"
+  rm -f "$UDEV_RULE_FILE"
+
+else
+  echo "Error: unknown task" >&2
+  exit 1
+fi
 
 exit 0

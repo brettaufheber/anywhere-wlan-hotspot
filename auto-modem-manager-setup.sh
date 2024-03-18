@@ -17,7 +17,6 @@ while true; do
   sleep 1
 done
 
-echo "set connect-delay 20" > "$PIPE_FILE"
 echo "connect" > "$PIPE_FILE"
 
 exit 0

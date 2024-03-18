@@ -8,17 +8,15 @@ function main {
   # PID_FILE
   # VENDOR_ID
   # PRODUCT_ID
-  # MODE_SWITCH_OPTIONS
   # CONNECTION_ID
+  # MODE_SWITCH_OPTIONS
+  # MODEM_BOOT_DELAY
   #
 
   local RUNNING
-  local CONNECT_DELAY
   local LINE
-  local CMD
 
   RUNNING=true
-  CONNECT_DELAY=0
 
   # create PID file
   echo "$$" > "$PID_FILE"
@@ -34,25 +32,18 @@ function main {
   while $RUNNING; do
     if read -r LINE; then
 
-      # separate the command and possible arguments
-      IFS=' ' read -ra CMD <<< "$LINE"
-
-      case "${CMD[0]}" in
+      case "$LINE" in
         connect)
-          if [[ "${#CMD[@]}" -ne 1 ]]; then
-            echo "User-Input-Error:  The 'connect' command does not take any arguments" >&2
-          elif [[ "$(cat "$LOCK_FILE")" != "DISCONNECTED" ]]; then
+          if [[ "$(cat "$LOCK_FILE")" != "DISCONNECTED" ]]; then
             echo "Invalid-State-Error: The 'connect' command is ignored because a connection is already active or being established" >&2
           else
-            echo "Starting modem connection with a delay of $CONNECT_DELAY seconds..."
+            echo "Starting modem connection with a delay of $MODEM_BOOT_DELAY seconds..."
             echo "CONNECTING" > "$LOCK_FILE"
-            (sleep "$CONNECT_DELAY" && connect_modem && echo "CONNECTED" > "$LOCK_FILE" || echo "DISCONNECTED" > "$LOCK_FILE") &
+            (sleep "$MODEM_BOOT_DELAY" && connect_modem && echo "CONNECTED" > "$LOCK_FILE" || echo "DISCONNECTED" > "$LOCK_FILE") &
           fi
           ;;
         disconnect)
-          if [[ "${#CMD[@]}" -ne 1 ]]; then
-            echo "User-Input-Error:  The 'disconnect' command does not take any arguments" >&2
-          elif [[ "$(cat "$LOCK_FILE")" != "CONNECTED" ]]; then
+          if [[ "$(cat "$LOCK_FILE")" != "CONNECTED" ]]; then
             echo "Invalid-State-Error: The 'disconnect' command is ignored because no active connection exists" >&2
           else
             echo "Stopping modem connection..."
@@ -61,9 +52,7 @@ function main {
           fi
           ;;
         shutdown)
-          if [[ "${#CMD[@]}" -ne 1 ]]; then
-            echo "User-Input-Error:  The 'shutdown' command does not take any arguments" >&2
-          elif [[ "$(cat "$LOCK_FILE")" == "CONNECTED" ]]; then
+          if [[ "$(cat "$LOCK_FILE")" == "CONNECTED" ]]; then
             echo "Stopping modem service and modem connection gracefully..."
             disconnect_modem || true
             echo "DISCONNECTED" > "$LOCK_FILE"
@@ -71,27 +60,6 @@ function main {
           else
             echo "Stopping modem service gracefully..."
             RUNNING=false
-          fi
-          ;;
-        set)
-          if [[ "${#CMD[@]}" -ne 3 ]]; then
-            echo "User-Input-Error:  The 'set <key> <value>' command requires exactly two argument" >&2
-          else
-            if [[ "${CMD[1]}" = 'connect-delay' && "${CMD[2]}" =~ ^[0-9]+$ ]]; then
-              CONNECT_DELAY="${CMD[2]}"
-              echo "Set connect delay to $CONNECT_DELAY seconds"
-            elif [[ "${CMD[1]}" = 'allow-roaming' && "${CMD[2]}" =~ ^(true)|(yes)|(on)|(1)$ ]]; then
-              DISALLOW_ROAMING=false
-              echo "Allow roaming after reconnect"
-            elif [[ "${CMD[1]}" = 'allow-roaming' && "${CMD[2]}" =~ ^(false)|(no)|(off)|(0)$ ]]; then
-              DISALLOW_ROAMING=true
-              echo "Disallow roaming after reconnect"
-            elif [[ "${CMD[1]}" = 'apn' && "${CMD[2]}" =~ ^[a-zA-Z0-9.-]+$ ]]; then
-              APN="${CMD[2]}"
-              echo "Set APN to $APN"
-            else
-              echo "User-Input-Error: Incorrect arguments for the 'set <key> <value>' command" >&2
-            fi
           fi
           ;;
         *)
@@ -142,6 +110,9 @@ function connect_modem {
   local MODEM_INDEX
   local MODEM_BEARER_INDEX
   local MODEM_DEVICE
+  local NET_INTERFACE
+  local APN_CONFIGURED
+  local APN
 
   set +e
   LSUSB_OUTPUT="$(lsusb | grep -E "ID\s+$VENDOR_ID:$PRODUCT_ID")"
@@ -194,36 +165,29 @@ function connect_modem {
   MODEM_INDEX="$(echo "$FIND_MODEM_OUTPUT" | grep -oP 'index=\K\w+')"
   MODEM_DEVICE="$(echo "$FIND_MODEM_OUTPUT" | grep -oP 'device=\K/dev/\w+')"
 
-  {
-    echo "[connection]"
-    echo "id=$CONNECTION_ID"
-    echo "type=gsm"
-    echo "autoconnect=no"
-    echo
-    echo "[gsm]"
-    echo "auto-config=true"
-    echo "home-only=${DISALLOW_ROAMING:-true}"
-    echo "apn=${APN:-$(get_apn "$MODEM_DEVICE")}"
-    echo
-    echo "[ipv4]"
-    echo "method=auto"
-    echo
-    echo "[ipv6]"
-    echo "method=ignore"
-    echo
-  } > "/etc/NetworkManager/system-connections/$CONNECTION_ID.nmconnection"
+  APN_CONFIGURED=$(nmcli -g gsm.apn connection show "$CONNECTION_ID")
 
-  chmod 600 "/etc/NetworkManager/system-connections/$CONNECTION_ID.nmconnection"
+  if [[ -z "$APN_CONFIGURED" ]]; then
+    APN="$(get_apn "$MODEM_DEVICE")"
+    echo "Use an APN determined by the modem settings: $APN"
+    nmcli connection modify "$CONNECTION_ID" gsm.apn "$APN"
+    nmcli connection reload
+  else
+    echo "Use a manually configured APN: $APN_CONFIGURED"
+  fi
 
-  nmcli connection reload
+  NET_INTERFACE="$(nmcli connection show "$CONNECTION_ID" | grep '^GENERAL.IP-IFACE:' | grep -oP ':\s*\K\w+')"
+
   run_connection_up
-  ip route add default dev "$(nmcli connection show "$CONNECTION_ID" | grep '^GENERAL.IP-IFACE:' | grep -oP ':\s*\K\w+')"
+  ip route del default
+  ip route add default dev "$NET_INTERFACE"
 
   # display current routing table
   echo "The current routing table:"
   ip route
 
-  MODEM_BEARER_INDEX="$(mmcli -m "$MODEM_INDEX" --output-keyvalue | grep -F 'modem.generic.bearers.value' | grep -oP ':\s*/org/freedesktop/ModemManager\d+/Bearer/\K\d+' | head -n 1)"
+  MODEM_BEARER_INDEX="$(mmcli -m "$MODEM_INDEX" --output-keyvalue | grep -F 'modem.generic.bearers.value' |
+    grep -oP ':\s*/org/freedesktop/ModemManager\d+/Bearer/\K\d+' | head -n 1)"
 
   # show metrics about modem
   echo "The metrics about the established connection:"
@@ -235,9 +199,8 @@ function connect_modem {
 
 function disconnect_modem  {
 
-  ip route del default || true
-  run_connection_down || true
-  nmcli con delete "$CONNECTION_ID" || true
+  ip route del default
+  run_connection_down
 }
 
 function run_usb_modeswitch {
@@ -276,10 +239,10 @@ function run_usb_modeswitch {
 
 function run_connection_up {
 
-  local RETRY_LIMIT       # maximum number of retry attempts
-  local RETRY_COUNT       # current number of retry attempts
+  local RETRY_LIMIT # maximum number of retry attempts
+  local RETRY_COUNT # current number of retry attempts
 
-  RETRY_LIMIT=5
+  RETRY_LIMIT=10
   RETRY_COUNT=0
 
   while true; do
@@ -301,10 +264,10 @@ function run_connection_up {
 
 function run_connection_down {
 
-  local RETRY_LIMIT       # maximum number of retry attempts
-  local RETRY_COUNT       # current number of retry attempts
+  local RETRY_LIMIT # maximum number of retry attempts
+  local RETRY_COUNT # current number of retry attempts
 
-  RETRY_LIMIT=5
+  RETRY_LIMIT=10
   RETRY_COUNT=0
 
   while true; do
